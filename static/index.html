@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>動画学習プロトタイプ</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --card: #1a2129;
+    --accent: #4a9eff;
+    --ok: #3ddc84;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --border: #2a3540;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .uid { color: var(--muted); font-size: 13px; }
+  .layout { display: flex; gap: 24px; padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .sidebar { width: 240px; flex-shrink: 0; }
+  .main { flex: 1; min-width: 0; }
+  .video-item {
+    padding: 12px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .video-item:hover { border-color: var(--accent); }
+  .video-item.active { border-color: var(--accent); background: #20303f; }
+  .video-item .title { font-size: 14px; font-weight: 600; }
+  .video-item .dur { font-size: 12px; color: var(--muted); }
+  video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+  }
+  .bar-wrap { background: #0a0e12; border-radius: 6px; overflow: hidden; height: 14px; margin: 10px 0; }
+  .bar { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
+  .bar.done { background: var(--ok); }
+  .stat { display: flex; justify-content: space-between; font-size: 14px; }
+  .stat .v { font-variant-numeric: tabular-nums; }
+  .badge {
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; margin-top: 8px;
+  }
+  .badge.pending { background: #2a3540; color: var(--muted); }
+  .badge.done { background: var(--ok); color: #003318; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+  .seg-map { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 10px; }
+  .seg { width: 10px; height: 10px; border-radius: 2px; background: #2a3540; }
+  .seg.on { background: var(--accent); }
+
+  /* --- スマホ対応(画面幅700px以下) --- */
+  @media (max-width: 700px) {
+    header {
+      padding: 12px 16px;
+      flex-wrap: wrap;          /* 狭いと折り返す */
+      align-items: center;
+      gap: 8px;
+    }
+    header h1 { font-size: 16px; }
+    #reset-btn { margin-left: auto; }  /* 右端に維持 */
+
+    .layout {
+      flex-direction: column;   /* 横並び→縦積み */
+      gap: 16px;
+      padding: 14px;
+    }
+    .sidebar { width: 100%; }   /* 固定240px幅を解除 */
+
+    /* 動画リストは横スクロールにして場所を取らない */
+    #video-list {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .video-item {
+      flex-shrink: 0;
+      min-width: 150px;
+      margin-bottom: 0;
+    }
+
+    .panel { padding: 14px; }
+    /* マスを少し大きくしてタップ画面でも見やすく */
+    .seg { width: 12px; height: 12px; }
+  }
+
+  /* さらに狭い端末(小型スマホ) */
+  @media (max-width: 380px) {
+    .seg { width: 10px; height: 10px; }
+    .video-item { min-width: 130px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ログイン/登録画面(未ログイン時に表示) -->
+<div id="auth-screen" style="display:none; max-width:360px; margin:80px auto; padding:28px; background:var(--card); border:1px solid var(--border); border-radius:12px;">
+  <h1 style="font-size:18px; margin:0 0 4px;">動画学習プロトタイプ</h1>
+  <div id="auth-mode-label" style="color:var(--muted); font-size:13px; margin-bottom:20px;">ログイン</div>
+  <input id="auth-username" placeholder="ユーザー名" autocomplete="username"
+         style="width:100%; padding:11px 12px; margin-bottom:10px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+  <input id="auth-password" type="password" placeholder="パスワード" autocomplete="current-password"
+         style="width:100%; padding:11px 12px; margin-bottom:14px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+  <div id="auth-error" style="display:none; color:#f09595; font-size:13px; margin-bottom:12px;"></div>
+  <button id="auth-submit"
+          style="width:100%; padding:12px; background:var(--accent); color:#001; border:none; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer;">ログイン</button>
+  <div style="text-align:center; margin-top:16px; font-size:13px; color:var(--muted);">
+    <a id="auth-toggle" href="#" style="color:var(--accent); text-decoration:none;">アカウントを新規作成</a>
+  </div>
+</div>
+
+<!-- アプリ本体(ログイン後に表示) -->
+<div id="app" style="display:none;">
+<header>
+  <h1>動画学習プロトタイプ</h1>
+  <span class="uid">受講者: <span id="uid"></span></span>
+  <button id="admin-btn" style="display:none; margin-left:auto; padding:6px 12px; background:var(--accent); color:#001; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">管理</button>
+  <button id="reset-btn" style="margin-left:auto; padding:6px 12px; background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:6px; font-size:12px; cursor:pointer;">進捗をリセット</button>
+  <button id="logout-btn" style="padding:6px 12px; background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:6px; font-size:12px; cursor:pointer;">ログアウト</button>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+    <div id="video-list"></div>
+  </div>
+  <div class="main">
+    <video id="player" controls playsinline webkit-playsinline
+           controlsList="nofullscreen noplaybackrate noremoteplayback"
+           disablePictureInPicture preload="metadata">
+      <track id="captions" kind="subtitles" srclang="ja" label="日本語" default>
+    </video>
+    <div class="panel" id="progress-panel" style="display:none">
+      <div class="stat"><span>視聴進捗</span><span class="v" id="ratio-text">0%</span></div>
+      <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+      <div class="stat"><span>視聴済み区間</span><span class="v" id="seg-text">0 / 0</span></div>
+      <div id="badge" class="badge pending">未修了</div>
+      <div class="seg-map" id="seg-map"></div>
+      <div class="hint">
+        シークで飛ばした区間・極端な早送り・離席中はカウントされません。
+        サーバー側で連続再生を検証しています。
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /#app -->
+
+<!-- クイズモーダル(全画面・正解するまで閉じない) -->
+<div id="quiz-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--card); border:1px solid var(--border); border-radius:12px; max-width:460px; width:100%; padding:24px;">
+    <div style="font-size:13px; color:var(--accent); margin-bottom:12px;">確認クイズ</div>
+    <div id="quiz-question" style="font-size:16px; font-weight:600; margin-bottom:18px;"></div>
+    <div id="quiz-choices"></div>
+    <div id="quiz-feedback" style="display:none; margin-top:16px; padding:12px 14px; border-radius:8px; font-size:14px;"></div>
+    <button id="quiz-continue" style="display:none; margin-top:16px; width:100%; padding:12px; background:var(--ok); color:#003318; border:none; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer;">続ける</button>
+  </div>
+</div>
+
+<!-- 管理画面(管理者のみ) -->
+<div id="admin-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:1100; overflow:auto; padding:24px;">
+  <div style="max-width:900px; margin:0 auto;">
+    <div style="display:flex; align-items:center; margin-bottom:16px;">
+      <h2 style="font-size:18px; margin:0;">管理</h2>
+      <button id="admin-close" style="margin-left:auto; padding:6px 12px; background:transparent; color:var(--text); border:1px solid var(--border); border-radius:6px; font-size:12px; cursor:pointer;">閉じる</button>
+    </div>
+
+    <!-- タブ -->
+    <div style="display:flex; gap:8px; margin-bottom:18px; border-bottom:1px solid var(--border);">
+      <button class="admin-tab active" data-tab="status" style="padding:8px 14px; background:none; border:none; border-bottom:2px solid var(--accent); color:var(--text); font-size:14px; cursor:pointer;">受講状況</button>
+      <button class="admin-tab" data-tab="content" style="padding:8px 14px; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); font-size:14px; cursor:pointer;">コンテンツ管理</button>
+    </div>
+
+    <!-- タブ1: 受講状況 -->
+    <div id="tab-status">
+      <div style="text-align:right; margin-bottom:8px;">
+        <button id="admin-refresh" style="padding:6px 12px; background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:6px; font-size:12px; cursor:pointer;">更新</button>
+      </div>
+      <div id="admin-content" style="font-size:13px; color:var(--muted);">読み込み中...</div>
+      <div class="hint" style="margin-top:14px;">
+        各セルは「視聴% / クイズ通過数」。✓ は視聴が修了ラインに達した受講者です。
+      </div>
+    </div>
+
+    <!-- タブ2: コンテンツ管理 -->
+    <div id="tab-content" style="display:none;">
+
+      <!-- 動画の追加 -->
+      <div style="background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:18px;">
+        <div style="font-weight:600; margin-bottom:12px;">動画を追加</div>
+        <input id="nv-title" placeholder="タイトル(例: レッスン4 接客の基本)"
+               style="width:100%; padding:10px; margin-bottom:10px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+        <input id="nv-file" type="file" accept="video/*"
+               style="width:100%; margin-bottom:8px; color:var(--muted); font-size:13px;">
+        <div id="nv-duration" style="font-size:12px; color:var(--muted); margin-bottom:10px;">動画を選ぶと長さを自動取得します</div>
+        <div id="nv-error" style="display:none; color:#f09595; font-size:13px; margin-bottom:8px;"></div>
+        <button id="nv-submit" style="padding:9px 16px; background:var(--accent); color:#001; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer;">アップロードして追加</button>
+      </div>
+
+      <!-- 動画一覧 -->
+      <div style="margin-bottom:24px;">
+        <div style="font-weight:600; margin-bottom:8px;">登録済みの動画</div>
+        <div id="admin-video-list" style="font-size:13px;"></div>
+      </div>
+
+      <!-- クイズの追加 -->
+      <div style="background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px;">
+        <div style="font-weight:600; margin-bottom:12px;">クイズを追加</div>
+        <select id="nq-video" style="width:100%; padding:10px; margin-bottom:10px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;"></select>
+        <input id="nq-at" type="number" placeholder="出題位置(秒) 例: 82"
+               style="width:100%; padding:10px; margin-bottom:10px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+        <input id="nq-question" placeholder="問題文"
+               style="width:100%; padding:10px; margin-bottom:10px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+        <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">選択肢(ラジオで正解を選択。空欄の行は無視されます)</div>
+        <div id="nq-choices"></div>
+        <input id="nq-explanation" placeholder="解説(正解時に表示・任意)"
+               style="width:100%; padding:10px; margin:10px 0; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+        <input id="nq-rewind" type="number" placeholder="不正解時の巻き戻し先(秒・任意。出題位置より前に)"
+               style="width:100%; padding:10px; margin-bottom:10px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">
+        <div id="nq-error" style="display:none; color:#f09595; font-size:13px; margin-bottom:8px;"></div>
+        <button id="nq-submit" style="padding:9px 16px; background:var(--accent); color:#001; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer;">クイズを追加</button>
+
+        <div style="font-weight:600; margin:20px 0 8px;">この動画の既存クイズ</div>
+        <div id="admin-quiz-list" style="font-size:13px;"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  .quiz-choice {
+    display:block; width:100%; text-align:left; margin-bottom:8px;
+    padding:12px 14px; background:#0f1923; color:var(--text);
+    border:1px solid var(--border); border-radius:8px;
+    font-size:14px; cursor:pointer; transition:border-color .15s;
+  }
+  .quiz-choice:hover:not(:disabled) { border-color:var(--accent); }
+  .quiz-choice:disabled { opacity:.6; cursor:default; }
+  .quiz-choice.wrong { border-color:#e24b4a; background:#2a1515; }
+
+  #admin-content table { border-collapse: collapse; width: 100%; }
+  #admin-content th, #admin-content td {
+    border: 1px solid var(--border); padding: 8px 10px; text-align: center; font-size: 13px;
+  }
+  #admin-content th { background: var(--card); color: var(--text); position: sticky; top: 0; }
+  #admin-content td.user { text-align: left; color: var(--text); font-weight: 600; white-space: nowrap; }
+  #admin-content td.done { background: #143024; color: var(--ok); }
+  #admin-content .pct { color: var(--text); }
+  #admin-content .qz { color: var(--muted); font-size: 12px; }
+</style>
+
+<script>
+// 受講者IDを簡易生成(プロトタイプ用。実運用ではログイン認証に置き換え)
+// 識別はサーバーのログインセッション(Cookie)で行う。
+// ブラウザ側でIDを作って送ることはしない(なりすまし防止)。
+let currentUser = null;
+
+const player = document.getElementById("player");
+const listEl = document.getElementById("video-list");
+const panel = document.getElementById("progress-panel");
+let currentVideo = null;
+let heartbeatTimer = null;
+
+// --- 認証フロー -----------------------------------------------------------
+let authMode = "login";  // "login" | "register"
+
+async function checkAuth() {
+  const res = await fetch("/api/me");
+  if (res.ok) {
+    const d = await res.json();
+    startApp(d.username, d.is_admin);
+  } else {
+    document.getElementById("auth-screen").style.display = "block";
+  }
+}
+
+function startApp(username, isAdmin) {
+  currentUser = username;
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  document.getElementById("uid").textContent = username;
+  if (isAdmin) document.getElementById("admin-btn").style.display = "inline-block";
+  loadVideos();
+}
+
+document.getElementById("auth-toggle").onclick = (e) => {
+  e.preventDefault();
+  authMode = (authMode === "login") ? "register" : "login";
+  const isLogin = authMode === "login";
+  document.getElementById("auth-mode-label").textContent = isLogin ? "ログイン" : "新規登録";
+  document.getElementById("auth-submit").textContent = isLogin ? "ログイン" : "登録して開始";
+  document.getElementById("auth-toggle").textContent = isLogin ? "アカウントを新規作成" : "ログインに戻る";
+  document.getElementById("auth-error").style.display = "none";
+};
+
+document.getElementById("auth-submit").onclick = doAuth;
+document.getElementById("auth-password").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") doAuth();
+});
+
+async function doAuth() {
+  const username = document.getElementById("auth-username").value.trim();
+  const password = document.getElementById("auth-password").value;
+  const errEl = document.getElementById("auth-error");
+  errEl.style.display = "none";
+  if (!username || !password) {
+    errEl.textContent = "ユーザー名とパスワードを入力してください";
+    errEl.style.display = "block";
+    return;
+  }
+  const endpoint = (authMode === "register") ? "/api/register" : "/api/login";
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    errEl.textContent = data.detail || "失敗しました";
+    errEl.style.display = "block";
+    return;
+  }
+  // 登録の場合はそのまま続けてログイン
+  if (authMode === "register") {
+    await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+  }
+  // ログイン状態(管理者かどうか含む)を取得してアプリ開始
+  checkAuth();
+}
+
+document.getElementById("logout-btn").onclick = async () => {
+  await fetch("/api/logout", { method: "POST" });
+  location.reload();
+};
+
+function fmtDur(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+async function loadVideos() {
+  const res = await fetch("/api/videos");
+  const videos = await res.json();
+  listEl.innerHTML = "";
+  if (videos.length === 0) {
+    listEl.innerHTML = '<div class="hint">videos.json に動画が登録されていません。</div>';
+    return;
+  }
+  videos.forEach(v => {
+    const div = document.createElement("div");
+    div.className = "video-item";
+    div.innerHTML = `<div class="title">${v.title}</div><div class="dur">${fmtDur(v.duration)}</div>`;
+    div.onclick = () => selectVideo(v, div);
+    listEl.appendChild(div);
+  });
+}
+
+function selectVideo(v, el) {
+  document.querySelectorAll(".video-item").forEach(e => e.classList.remove("active"));
+  el.classList.add("active");
+  currentVideo = v;
+  player.src = "/video/" + v.id;
+  document.getElementById("captions").src = "/subs/" + v.id + ".vtt";
+  panel.style.display = "block";
+  loadQuizzes();
+  refreshProgress();
+}
+
+// --- クイズ ---------------------------------------------------------------
+let quizzes = [];          // この動画のクイズ一覧(正解は含まない)
+let answeredIds = new Set(); // 正解済みクイズID
+let activeQuiz = null;     // 表示中のクイズ
+
+async function loadQuizzes() {
+  quizzes = [];
+  answeredIds = new Set();
+  activeQuiz = null;
+  const res = await fetch("/api/quiz/" + currentVideo.id);
+  if (res.ok) quizzes = await res.json();
+}
+
+// 再生位置を監視し、未回答クイズの時刻を超えたら一時停止して出題
+player.addEventListener("timeupdate", () => {
+  if (activeQuiz || !quizzes.length) return;
+  const due = quizzes.find(q =>
+    !answeredIds.has(q.id) && player.currentTime >= q.at
+  );
+  if (due) showQuiz(due);
+});
+
+function showQuiz(q) {
+  activeQuiz = q;
+  player.pause();
+  document.getElementById("quiz-question").textContent = q.question;
+  const choicesEl = document.getElementById("quiz-choices");
+  choicesEl.innerHTML = "";
+  q.choices.forEach((text, idx) => {
+    const btn = document.createElement("button");
+    btn.className = "quiz-choice";
+    btn.textContent = text;
+    btn.onclick = () => answerQuiz(idx, btn);
+    choicesEl.appendChild(btn);
+  });
+  document.getElementById("quiz-feedback").style.display = "none";
+  document.getElementById("quiz-continue").style.display = "none";
+  document.getElementById("quiz-overlay").style.display = "flex";
+}
+
+async function answerQuiz(choiceIdx, btnEl) {
+  const res = await fetch("/api/quiz/answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      video_id: currentVideo.id,
+      quiz_id: activeQuiz.id,
+      choice: choiceIdx,
+    }),
+  });
+  const data = await res.json();
+  const fb = document.getElementById("quiz-feedback");
+
+  if (data.correct) {
+    // 正解: 解説を出して「続ける」で再生再開
+    fb.style.display = "block";
+    fb.style.background = "#143024";
+    fb.style.color = "var(--ok)";
+    fb.innerHTML = "✓ 正解!<br><span style='color:var(--text);font-size:13px'>" + data.explanation + "</span>";
+    document.querySelectorAll(".quiz-choice").forEach(b => b.disabled = true);
+    document.getElementById("quiz-continue").style.display = "block";
+    answeredIds.add(activeQuiz.id);
+  } else {
+    // 不正解
+    if (data.rewind_to !== null && data.rewind_to < activeQuiz.at) {
+      // 巻き戻し先が指定されていれば、その位置まで戻して見直させる
+      fb.style.display = "block";
+      fb.style.background = "#2a1515";
+      fb.style.color = "#f09595";
+      fb.textContent = "不正解です。該当箇所まで戻して、もう一度見てみましょう。";
+      const target = data.rewind_to;
+      // 少し見せてからモーダルを閉じて巻き戻す
+      setTimeout(() => {
+        document.getElementById("quiz-overlay").style.display = "none";
+        activeQuiz = null;          // 再び at に達したら再出題される
+        player.currentTime = target;
+        player.play();
+      }, 1200);
+    } else {
+      // 巻き戻し先がなければ、その選択肢に印をつけて再挑戦(モーダルは閉じない)
+      btnEl.classList.add("wrong");
+      btnEl.disabled = true;
+      fb.style.display = "block";
+      fb.style.background = "#2a1515";
+      fb.style.color = "#f09595";
+      fb.textContent = "不正解です。もう一度考えてみましょう。";
+    }
+  }
+}
+
+document.getElementById("quiz-continue").onclick = () => {
+  document.getElementById("quiz-overlay").style.display = "none";
+  activeQuiz = null;
+  player.play();
+};
+
+// ハートビート送信(5秒ごと)
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(sendHeartbeat, 5000);
+}
+function stopHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
+async function sendHeartbeat() {
+  if (!currentVideo) return;
+  const res = await fetch("/api/heartbeat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      video_id: currentVideo.id,
+      position: player.currentTime,
+      playing: !player.paused && !player.ended,
+    }),
+  });
+  if (res.ok) updateUI(await res.json());
+}
+
+async function refreshProgress() {
+  if (!currentVideo) return;
+  const res = await fetch(`/api/progress/${currentVideo.id}`);
+  if (res.ok) {
+    const d = await res.json();
+    updateUI(d);
+    renderSegMap(d);
+  }
+}
+
+function updateUI(d) {
+  const pct = Math.round(d.ratio * 100);
+  document.getElementById("ratio-text").textContent = pct + "%";
+  document.getElementById("seg-text").textContent = `${d.watched_segments} / ${d.total_segments}`;
+  const bar = document.getElementById("bar");
+  bar.style.width = pct + "%";
+  bar.classList.toggle("done", d.completed);
+  const badge = document.getElementById("badge");
+  if (d.completed) {
+    badge.className = "badge done";
+    badge.textContent = "✓ 修了";
+  } else {
+    badge.className = "badge pending";
+    badge.textContent = "未修了";
+  }
+}
+
+function renderSegMap(d) {
+  const map = document.getElementById("seg-map");
+  map.innerHTML = "";
+  const watched = new Set(d.watched_list || []);
+  for (let i = 0; i < d.total_segments; i++) {
+    const s = document.createElement("div");
+    s.className = "seg" + (watched.has(i) ? " on" : "");
+    map.appendChild(s);
+  }
+}
+
+player.addEventListener("play", startHeartbeat);
+player.addEventListener("pause", () => { stopHeartbeat(); sendHeartbeat(); });
+player.addEventListener("ended", () => { stopHeartbeat(); sendHeartbeat(); setTimeout(refreshProgress, 300); });
+
+// 全画面に入ろうとしたら戻す(クイズのモーダルが映像の下に隠れるのを防ぐ)
+// iOS Safari は controlsList を無視するので、JSでも全画面を弾く
+player.addEventListener("webkitbeginfullscreen", () => {
+  try { player.webkitExitFullscreen(); } catch (e) {}
+});
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement === player) {
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  }
+});
+
+// PC: 動画上の右クリックを無効化
+// (右クリックメニューに残る「全画面表示」「PiP」経由の抜け道を塞ぐ)
+player.addEventListener("contextmenu", e => e.preventDefault());
+// 区間が埋まるたびにマップを更新
+setInterval(() => { if (currentVideo && !player.paused) refreshProgress(); }, 5000);
+
+// 進捗リセット(自分の進捗のみ。サーバーがセッションから本人を判定する)
+document.getElementById("reset-btn").onclick = async () => {
+  if (!confirm("あなた(" + currentUser + ")の進捗をすべて削除します。よろしいですか?")) return;
+  await fetch("/api/progress", { method: "DELETE" });
+  location.reload();  // 進捗が消えた状態で最初から
+};
+
+// --- 管理画面 -------------------------------------------------------------
+document.getElementById("admin-btn").onclick = () => {
+  document.getElementById("admin-overlay").style.display = "block";
+  loadAdminOverview();
+};
+document.getElementById("admin-close").onclick = () => {
+  document.getElementById("admin-overlay").style.display = "none";
+};
+document.getElementById("admin-refresh").onclick = loadAdminOverview;
+
+async function loadAdminOverview() {
+  const content = document.getElementById("admin-content");
+  content.textContent = "読み込み中...";
+  const res = await fetch("/api/admin/overview");
+  if (!res.ok) {
+    content.textContent = "取得に失敗しました(権限がない可能性があります)";
+    return;
+  }
+  const data = await res.json();
+  renderAdminTable(data);
+}
+
+function renderAdminTable(data) {
+  const content = document.getElementById("admin-content");
+  if (data.users.length === 0) {
+    content.textContent = "まだ受講者がいません。";
+    return;
+  }
+  const pctThreshold = Math.round(data.completion_ratio * 100);
+  let html = "<table><thead><tr><th>受講者</th>";
+  data.videos.forEach(v => {
+    html += `<th>${escapeHtml(v.title)}<br><span class="qz">クイズ ${v.total_quizzes}問</span></th>`;
+  });
+  html += "</tr></thead><tbody>";
+  data.users.forEach(u => {
+    html += `<tr><td class="user">${escapeHtml(u.username)}</td>`;
+    data.videos.forEach(v => {
+      const cell = u.per_video[v.id];
+      const pct = Math.round(cell.ratio * 100);
+      const cls = cell.completed ? "done" : "";
+      const check = cell.completed ? "✓ " : "";
+      html += `<td class="${cls}">
+        <span class="pct">${check}${pct}%</span><br>
+        <span class="qz">クイズ ${cell.quizzes_passed}/${v.total_quizzes}</span>
+      </td>`;
+    });
+    html += "</tr>";
+  });
+  html += "</tbody></table>";
+  content.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// --- 管理: タブ切り替え ---------------------------------------------------
+document.querySelectorAll(".admin-tab").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".admin-tab").forEach(b => {
+      b.classList.remove("active");
+      b.style.borderBottomColor = "transparent";
+      b.style.color = "var(--muted)";
+    });
+    btn.classList.add("active");
+    btn.style.borderBottomColor = "var(--accent)";
+    btn.style.color = "var(--text)";
+    const tab = btn.dataset.tab;
+    document.getElementById("tab-status").style.display = (tab === "status") ? "block" : "none";
+    document.getElementById("tab-content").style.display = (tab === "content") ? "block" : "none";
+    if (tab === "content") loadContentManager();
+  };
+});
+
+// --- 管理: コンテンツ管理 -------------------------------------------------
+let nvDuration = 0;  // アップロードする動画の長さ(ブラウザ側で取得)
+
+// 動画ファイルを選んだら長さを自動取得
+document.getElementById("nv-file").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  const label = document.getElementById("nv-duration");
+  nvDuration = 0;
+  if (!f) { label.textContent = "動画を選ぶと長さを自動取得します"; return; }
+  label.textContent = "長さを取得中...";
+  const url = URL.createObjectURL(f);
+  const v = document.createElement("video");
+  v.preload = "metadata";
+  v.onloadedmetadata = () => {
+    URL.revokeObjectURL(url);
+    nvDuration = v.duration;
+    const m = Math.floor(nvDuration / 60), s = Math.round(nvDuration % 60);
+    label.textContent = `長さ: ${m}分${s}秒(${Math.round(nvDuration)}秒)`;
+  };
+  v.onerror = () => { label.textContent = "この動画の長さを取得できませんでした"; };
+  v.src = url;
+});
+
+document.getElementById("nv-submit").onclick = async () => {
+  const title = document.getElementById("nv-title").value.trim();
+  const f = document.getElementById("nv-file").files[0];
+  const err = document.getElementById("nv-error");
+  err.style.display = "none";
+  if (!title || !f) { err.textContent = "タイトルと動画ファイルを指定してください"; err.style.display = "block"; return; }
+  if (!nvDuration) { err.textContent = "動画の長さを取得できていません(少し待つか別ファイルを)"; err.style.display = "block"; return; }
+  const fd = new FormData();
+  fd.append("title", title);
+  fd.append("duration", nvDuration);
+  fd.append("file", f);
+  document.getElementById("nv-submit").textContent = "アップロード中...";
+  const res = await fetch("/api/admin/video", { method: "POST", body: fd });
+  document.getElementById("nv-submit").textContent = "アップロードして追加";
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { err.textContent = data.detail || "失敗しました"; err.style.display = "block"; return; }
+  // リセットして再読み込み
+  document.getElementById("nv-title").value = "";
+  document.getElementById("nv-file").value = "";
+  document.getElementById("nv-duration").textContent = "動画を選ぶと長さを自動取得します";
+  nvDuration = 0;
+  loadContentManager();
+  loadVideos();  // 受講者側の一覧も更新
+};
+
+async function loadContentManager() {
+  // 動画一覧
+  const videos = await (await fetch("/api/videos")).json();
+  const vlist = document.getElementById("admin-video-list");
+  if (videos.length === 0) {
+    vlist.innerHTML = '<span style="color:var(--muted)">まだ動画がありません</span>';
+  } else {
+    vlist.innerHTML = videos.map(v => `
+      <div style="display:flex; align-items:center; padding:8px 10px; background:var(--card); border:1px solid var(--border); border-radius:8px; margin-bottom:6px;">
+        <span>${escapeHtml(v.title)} <span style="color:var(--muted); font-size:12px;">(${Math.round(v.duration)}秒)</span></span>
+        <button onclick="removeVideo('${v.id}')" style="margin-left:auto; padding:4px 10px; background:transparent; color:#f09595; border:1px solid #5a2a2a; border-radius:6px; font-size:12px; cursor:pointer;">一覧から外す</button>
+      </div>`).join("");
+  }
+  // クイズ追加フォームの動画セレクト
+  const sel = document.getElementById("nq-video");
+  const prev = sel.value;
+  sel.innerHTML = videos.map(v => `<option value="${v.id}">${escapeHtml(v.title)}</option>`).join("");
+  if (prev && videos.some(v => v.id === prev)) sel.value = prev;
+  loadAdminQuizList();
+}
+
+document.getElementById("nq-video").addEventListener("change", loadAdminQuizList);
+
+async function loadAdminQuizList() {
+  const vid = document.getElementById("nq-video").value;
+  const box = document.getElementById("admin-quiz-list");
+  if (!vid) { box.innerHTML = ""; return; }
+  const quizzes = await (await fetch("/api/admin/quizzes/" + vid)).json();
+  if (quizzes.length === 0) {
+    box.innerHTML = '<span style="color:var(--muted)">この動画にはまだクイズがありません</span>';
+    return;
+  }
+  box.innerHTML = quizzes.map(q => `
+    <div style="padding:10px; background:#0f1923; border:1px solid var(--border); border-radius:8px; margin-bottom:6px;">
+      <div style="display:flex; align-items:start;">
+        <div><span style="color:var(--muted); font-size:12px;">${q.at}秒</span> ${escapeHtml(q.question)}</div>
+        <button onclick="deleteQuiz('${vid}','${q.id}')" style="margin-left:auto; padding:4px 10px; background:transparent; color:#f09595; border:1px solid #5a2a2a; border-radius:6px; font-size:12px; cursor:pointer; white-space:nowrap;">削除</button>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-top:6px;">正解: ${escapeHtml(q.choices[q.answer])}</div>
+    </div>`).join("");
+}
+
+// クイズ選択肢の入力欄(4行・ラジオで正解)
+function buildChoiceInputs() {
+  const box = document.getElementById("nq-choices");
+  box.innerHTML = "";
+  for (let i = 0; i < 4; i++) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; align-items:center; gap:8px; margin-bottom:6px;";
+    row.innerHTML = `
+      <input type="radio" name="nq-correct" value="${i}" ${i === 0 ? "checked" : ""}>
+      <input class="nq-choice" placeholder="選択肢 ${i + 1}"
+             style="flex:1; padding:9px; background:#0f1923; color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:14px;">`;
+    box.appendChild(row);
+  }
+}
+
+document.getElementById("nq-submit").onclick = async () => {
+  const err = document.getElementById("nq-error");
+  err.style.display = "none";
+  const vid = document.getElementById("nq-video").value;
+  const at = parseFloat(document.getElementById("nq-at").value);
+  const question = document.getElementById("nq-question").value.trim();
+  const explanation = document.getElementById("nq-explanation").value.trim();
+  const rewindRaw = document.getElementById("nq-rewind").value;
+  const rewind_to = rewindRaw === "" ? null : parseFloat(rewindRaw);
+
+  // 選択肢と正解インデックスを集める(空欄は除外し、正解はその詰めた配列内の位置に直す)
+  const rows = [...document.querySelectorAll("#nq-choices > div")];
+  const checkedValue = parseInt(document.querySelector('input[name="nq-correct"]:checked').value);
+  const choices = [];
+  let answer = -1;
+  rows.forEach((row, i) => {
+    const text = row.querySelector(".nq-choice").value.trim();
+    if (text) {
+      if (i === checkedValue) answer = choices.length;
+      choices.push(text);
+    }
+  });
+
+  if (!vid) { err.textContent = "動画を選んでください"; err.style.display = "block"; return; }
+  if (isNaN(at)) { err.textContent = "出題位置(秒)を入力してください"; err.style.display = "block"; return; }
+  if (!question) { err.textContent = "問題文を入力してください"; err.style.display = "block"; return; }
+  if (choices.length < 2) { err.textContent = "選択肢を2つ以上入力してください"; err.style.display = "block"; return; }
+  if (answer < 0) { err.textContent = "正解にした選択肢が空欄です。正解の行に文字を入れてください"; err.style.display = "block"; return; }
+
+  const res = await fetch("/api/admin/quiz", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: vid, at, question, choices, answer, explanation, rewind_to }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { err.textContent = data.detail || "失敗しました"; err.style.display = "block"; return; }
+  // フォームをクリア
+  document.getElementById("nq-at").value = "";
+  document.getElementById("nq-question").value = "";
+  document.getElementById("nq-explanation").value = "";
+  document.getElementById("nq-rewind").value = "";
+  buildChoiceInputs();
+  loadAdminQuizList();
+};
+
+async function removeVideo(vid) {
+  if (!confirm("この動画を一覧から外しますか?(動画ファイル自体は残ります)")) return;
+  await fetch("/api/admin/video/" + vid, { method: "DELETE" });
+  loadContentManager();
+  loadVideos();
+}
+
+async function deleteQuiz(vid, qid) {
+  if (!confirm("このクイズを削除しますか?")) return;
+  await fetch(`/api/admin/quiz/${vid}/${qid}`, { method: "DELETE" });
+  loadAdminQuizList();
+}
+
+buildChoiceInputs();  // 初期化
+
+// 起動: まずログイン状態を確認
+checkAuth();
+</script>
+</body>
+</html>

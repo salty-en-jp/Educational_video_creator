@@ -1,0 +1,14 @@
+[
+  {
+    "id": "lesson01",
+    "title": "レッスン1: はじめに",
+    "file": "lesson01.mp4",
+    "duration": 60
+  },
+  {
+    "id": "lesson02",
+    "title": "レッスン2: 応用編",
+    "file": "lesson02.mp4",
+    "duration": 120
+  }
+]
